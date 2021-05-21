@@ -1,0 +1,196 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+
+
+# In[2]:
+
+
+import platform
+
+from matplotlib import font_manager, rc
+plt.rcParams['axes.unicode_minus'] = False
+
+if platform.system() == 'Darwin':
+    rc('font', family='AppleGothic')
+elif platform.system() == 'Windows':
+    path = "c:/Windows/Fonts/malgun.ttf"
+    font_name = font_manager.FontProperties(fname=path).get_name()
+    rc('font', family=font_name)
+else:
+    print('Unknown system... sorry~~~~')
+
+
+# # 1. 법정동 코드 가공
+
+# In[3]:
+
+
+#
+locCode = pd.read_excel("../data/법정동코드.xlsx")
+locCode.head(5)
+
+
+# In[4]:
+
+
+#읍면동이 NaN인 데이터 추출 > 읍면동 제외
+locCode.dropna(subset = ['읍면동명'], how = 'any', axis=0)
+
+
+# In[5]:
+
+
+# 시군구가 NaN이 아닌 데이터 추출 > 시도명 제외
+locCode.dropna(subset = ['시군구명'], how = 'any', axis=0)
+
+
+# In[6]:
+
+
+# 법정동 코드 컬럼에서 5자리 추출합니다.
+# 예) 서울특별시 종로구 > 11000
+locCode['지역코드']=(locCode['법정동코드']/10000).astype(int)
+locCode.head()
+
+
+# In[7]:
+
+
+locCode=locCode[locCode['시도명']=='서울특별시']
+
+
+# In[8]:
+
+
+# 실거래가 데이터 불러오기
+apt = pd.read_csv('../data/2020년 서울 아파트 실거래가.csv', encoding="cp949")
+apt.head()
+#평 계산
+
+
+# In[9]:
+
+
+locCode
+
+
+# In[10]:
+
+
+# 실거래가 + 법정동코드
+# merge = pd.merge(locCode,apt,how='left', left_on='법정동명', right_on='읍면동명')
+locCode.rename(columns = {'읍면동명' : '법정동명'}, inplace = True)
+df = pd.merge(apt,locCode,on='법정동명')
+df = df[df['건물주용도']=='아파트']
+
+
+# In[11]:
+
+
+df.drop(['법정동코드', '시도명', '동리명', '생성일자', '말소일자','지역코드','건물주용도코드'], axis=1, inplace=True)
+
+
+# In[12]:
+
+
+df['평당가'] = (df['거래금액']/(df['건물면적']/3.3)).astype(int)
+
+
+# In[13]:
+
+
+df['건축년도'] = df['건축년도'].replace(0.0,2020)
+df
+
+
+# ## 구별 노후아파트 아파트 개수와 평당가 비교
+
+# ### 구별 노후 아파트 개수 정렬
+
+# In[14]:
+
+
+# 건축년도가 1990년 이하인 아파트 출력(아파트 평균 수명은 30년)
+oldapt = df[df['건축년도']<=1990]
+#구별 아파트 개수를 알기위해 중복 아파트 데이터는 하나만 남기고 제외
+apt_result = oldapt.drop_duplicates(['아파트명','법정동명'],keep="first")
+apt_result
+
+
+# In[15]:
+
+
+result1 = apt_result['시군구명'].value_counts(ascending=False)
+result1.plot(kind="barh",fontsize=8)
+
+
+# In[16]:
+
+
+#구별 노후아파트 개수
+sub_pivot = apt_result.pivot_table(index='시군구명',values='건축년도',aggfunc='count')
+sub_pivot.rename(columns = {'건축년도' : '노후아파트 개수'}, inplace = True)
+
+#갯수 순서정렬
+sub_pivot = sub_pivot.reindex(sub_pivot.sort_values(by='노후아파트 개수', ascending=False).index)
+sub_pivot
+
+
+# ### 평당가 내림차순 정렬
+
+# In[17]:
+
+
+#구별 노후아파트 평당가 평균
+price = oldapt.pivot_table(index='시군구명',values='평당가',aggfunc='mean')
+p1 = price.astype({'평당가': 'int'})
+p1
+
+
+# In[18]:
+
+
+p1.plot(kind="barh",fontsize=8)
+
+
+# In[19]:
+
+
+final_result = pd.merge(sub_pivot,p1,on='시군구명')
+result_sorted_by_values = final_result.sort_values(by='평당가',ascending=True)
+result_sorted_by_values
+
+
+# ### 그래프 결과 확인
+
+# In[20]:
+
+
+sns.set_theme(style="white")
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['font.family'] = 'Gulim'
+
+# Plot miles per gallon against horsepower with other semantics
+sns.relplot(x="시군구명", y="평당가", size="노후아파트 개수",
+            sizes=(40, 1000), alpha=.5, palette="muted",
+            height=15,data=result_sorted_by_values)
+
+
+# ### 분석 결과
+#     건축 된 지 30년 이상 된 노후 아파트가 가장 많은 구는 강남구였고, 노후 아파트 기준 평당가가 가장 높은 지역 역시 강남구였다.  
+#     노후 아파트는 재개발이 될 가능성이 높으므로 이 점이 선반영되어 평당가에 영향을 미치고 있음을 확인했다. 또한 반대로 노후 아파트 수가 가장 적은 강북구는 평당가 또한 최저로 노후아파트 수가 상대적으로 적어 재개발이 될 가능성이 적다면 평당가또한 낮음을 알 수 있다. 
+
+# In[ ]:
+
+
+
+
